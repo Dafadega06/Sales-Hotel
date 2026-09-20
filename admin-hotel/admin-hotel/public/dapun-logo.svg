@@ -1,0 +1,12 @@
+<svg width="500" height="132" viewBox="0 0 500 132" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bolt" x1="48" y1="12" x2="142" y2="118" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F06487"/>
+      <stop offset="1" stop-color="#B71855"/>
+    </linearGradient>
+  </defs>
+  <path d="M35 9H163L116 62H183L54 128L76 72H8L35 9Z" fill="url(#bolt)" stroke="#F47A9A" stroke-width="1.2"/>
+  <text x="202" y="75" fill="#F8FAFC" font-family="Arial, Helvetica, sans-serif" font-size="62" font-weight="800" letter-spacing="-2">Dapun</text>
+  <rect x="444" y="63" width="22" height="22" rx="1" fill="#27D5D2"/>
+  <text x="203" y="108" fill="#8EA1BF" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700" letter-spacing="7">SAAS HOTEL PLATFORM</text>
+</svg>

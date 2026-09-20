@@ -1,0 +1,12 @@
+<svg width="900" height="300" viewBox="0 0 900 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="900" height="300" fill="#08090C"/>
+  <g stroke-linecap="round">
+    <path d="M93 69V230" stroke="#B7154E" stroke-width="25"/>
+    <path d="M94 153L150 94" stroke="#2DD0C7" stroke-width="25"/>
+    <path d="M95 153L172 230" stroke="#F06E83" stroke-width="25"/>
+  </g>
+  <circle cx="148" cy="153" r="25" fill="#F8B922"/>
+  <text x="231" y="170" fill="#F8FAFC" font-family="Arial, Helvetica, sans-serif" font-size="91" font-weight="700" letter-spacing="-2">Kawan Inap</text>
+  <rect x="817" y="157" width="15" height="15" fill="#2DD0C7"/>
+  <text x="234" y="225" fill="#71839F" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" letter-spacing="8">SALES HOTEL MANAGEMENT</text>
+</svg>
