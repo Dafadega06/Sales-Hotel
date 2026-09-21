@@ -3,7 +3,7 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/Sales-Hotel/',
+  base: process.env.VERCEL === '1' ? '/' : '/Sales-Hotel/',
   server: {
     fs: {
       strict: false,
