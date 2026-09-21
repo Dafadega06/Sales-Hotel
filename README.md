@@ -10,60 +10,19 @@ The application supports user authentication, reservation CRUD operations, custo
 
 ## Preview
 
-### Dashboard
+<img width="1905" height="912" alt="image" src="https://github.com/user-attachments/assets/5ae08b13-b1fc-4260-90be-5e34b209e305" />
+<img width="1898" height="912" alt="image" src="https://github.com/user-attachments/assets/565839ed-085b-4b47-9ba7-df1aed9f756e" />
 
-<p align="center">
-  <img src="./docs/screenshots/dashboard.png" alt="Dashboard" width="90%">
-</p>
+<img width="1910" height="957" alt="image" src="https://github.com/user-attachments/assets/8960e89c-b32d-4518-a01a-2c4b22ce05b7" />
+<img width="1892" height="907" alt="image" src="https://github.com/user-attachments/assets/edd1946d-6b83-4f7a-ae42-9cf94379efa9" />
+<img width="1895" height="916" alt="image" src="https://github.com/user-attachments/assets/174ac6e1-ca18-4cd6-be1e-2b6f6d1fd889" />
+<img width="1887" height="911" alt="image" src="https://github.com/user-attachments/assets/d83b6891-190d-458f-ab0b-652844f2bd67" />
+<img width="1897" height="912" alt="image" src="https://github.com/user-attachments/assets/9c3a2d50-0b1b-4dfc-b4c1-5ee93f7fbfef" />
 
-### Reservation Management
 
-<table>
-  <tr>
-    <td width="50%">
-      <img src="./docs/screenshots/reservation-list.png" alt="Reservation List">
-      <p align="center"><strong>Reservation List</strong></p>
-    </td>
-    <td width="50%">
-      <img src="./docs/screenshots/add-reservation.png" alt="Add Reservation">
-      <p align="center"><strong>Add Reservation</strong></p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <img src="./docs/screenshots/edit-reservation.png" alt="Edit Reservation">
-      <p align="center"><strong>Edit Reservation</strong></p>
-    </td>
-    <td width="50%">
-      <img src="./docs/screenshots/reservation-detail.png" alt="Reservation Detail">
-      <p align="center"><strong>Reservation Detail</strong></p>
-    </td>
-  </tr>
-</table>
 
-### Analytics
 
-<p align="center">
-  <img src="./docs/screenshots/revenue-chart.png" alt="Revenue Chart" width="90%">
-</p>
 
-### Search & Filtering
-
-<p align="center">
-  <img src="./docs/screenshots/reservation-search.png" alt="Search and Filter" width="90%">
-</p>
-
-### Customer Management
-
-<p align="center">
-  <img src="./docs/screenshots/customers.png" alt="Customers" width="90%">
-</p>
-
-### Settings
-
-<p align="center">
-  <img src="./docs/screenshots/settings.png" alt="Settings" width="90%">
-</p>
 
 ## Key Features
 
