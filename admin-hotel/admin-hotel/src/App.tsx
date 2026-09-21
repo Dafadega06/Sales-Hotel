@@ -3,13 +3,34 @@ import { ArrowUpRight, BedDouble, CalendarDays, Check, ChevronDown, CircleDollar
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import './App.css'
+import { supabase } from './lib/supabase'
 
 type Status = 'Belum Check In' | 'Sudah Check In'
 type Section = 'dashboard' | 'orders' | 'customers' | 'settings'
 type User = { name: string; role: string; initials: string; email: string; expiresAt?: number }
 type Reservation = { id: string; nama: string; hotel: string; harga: number; kamar: number; checkIn: Date; checkOut: Date; jamMasuk: string; nomorHp: string; status: Status }
 type FormState = { nama: string; hotel: string; harga: string; kamar: string; checkIn: string; checkOut: string; jamMasuk: string; nomorHp: string; status: Status }
-type StoredReservation = Omit<Reservation, 'checkIn' | 'checkOut'> & { checkIn: string; checkOut: string }
+
+function toAppUser(authUser: { email?: string | null; user_metadata?: Record<string, unknown> | null }): User {
+  const email = authUser.email?.trim().toLowerCase() || ''
+  const metadata = authUser.user_metadata || {}
+  const rawName = metadata['full_name']
+  const rawRole = metadata['role']
+  const name = typeof rawName === 'string' && rawName.trim()
+    ? rawName.trim()
+    : (email.split('@')[0] || 'Administrator')
+  const role = typeof rawRole === 'string' && rawRole.trim()
+    ? rawRole.trim()
+    : 'Administrator'
+  const initials = name
+    .split(/\s+/)
+    .map((word) => word[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || 'AD'
+
+  return { name, role, initials, email }
+}
 
 const builtInAccounts: Record<string, User & { password: string }> = {
   'admin@nafya.com': { name: 'Aditya Rahman', role: 'Administrator', initials: 'AR', email: 'admin@nafya.com', password: 'admin123' },
@@ -27,7 +48,6 @@ function App() {
   const [user, setUser] = useState<User | null>(null)
   const [authReady, setAuthReady] = useState(false)
   const [reservations, setReservations] = useState<Reservation[]>([])
-  const [loadedEmail, setLoadedEmail] = useState<string | null>(null)
   const [loginError, setLoginError] = useState('')
   const [login, setLogin] = useState({ email: 'admin@nafya.com', password: 'admin123' })
   const [section, setSection] = useState<Section>(() => sectionFromPath(window.location.pathname))
@@ -40,37 +60,90 @@ function App() {
   const [sidebar, setSidebar] = useState(false)
 
   useEffect(() => {
-    try {
-      const rawSession = localStorage.getItem('nafya-user')
-      if (rawSession) {
-        const parsed = JSON.parse(rawSession) as User
-        if (!parsed.email || !parsed.expiresAt || Date.now() >= parsed.expiresAt) {
+    let active = true
+
+    const restoreSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+
+      if (!active) return
+
+      if (session?.user) {
+        setUser(toAppUser(session.user))
+      } else {
+        try {
+          const rawSession = localStorage.getItem('nafya-user')
+          if (rawSession) {
+            const parsed = JSON.parse(rawSession) as User
+            const builtIn = builtInAccounts[parsed.email]
+            if (builtIn && parsed.expiresAt && Date.now() < parsed.expiresAt) {
+              setUser(parsed)
+            } else {
+              localStorage.removeItem('nafya-user')
+            }
+          }
+        } catch {
           localStorage.removeItem('nafya-user')
-        } else {
-          setUser(parsed)
         }
       }
-    } catch {
-      localStorage.removeItem('nafya-user')
-    } finally {
+
       setAuthReady(true)
+    }
+
+    restoreSession()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return
+
+      if (session?.user) {
+        setUser(toAppUser(session.user))
+      } else if (_event === 'SIGNED_OUT') {
+        setUser(null)
+      }
+
+      setAuthReady(true)
+    })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
     }
   }, [])
 
+
   useEffect(() => {
-    if (!user) { setReservations([]); setLoadedEmail(null); return }
-    setReservations(loadReservations(user.email))
-    setLoadedEmail(user.email)
+    let active = true
+
+    const load = async () => {
+      if (!user) {
+        setReservations([])
+        return
+      }
+
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
+
+      if (!active) return
+
+      if (authError || !authUser) {
+        setReservations([])
+        return
+      }
+
+      await migrateLegacyReservations(authUser.id, authUser.email || user.email)
+
+      const data = await loadReservations(authUser.id)
+
+      if (active) {
+        setReservations(data)
+      }
+    }
+
+    load()
+
+    return () => {
+      active = false
+    }
   }, [user?.email])
-  useEffect(() => {
-    if (user && loadedEmail === user.email) localStorage.setItem(bookingKey(user.email), JSON.stringify(reservations))
-  }, [loadedEmail, reservations, user])
   useEffect(() => { localStorage.setItem('nafya-settings', JSON.stringify(settings)); document.body.classList.toggle('compact-mode', settings.compact) }, [settings])
-  useEffect(() => {
-    if (!user?.expiresAt) return
-    const timeout = window.setTimeout(() => { localStorage.removeItem('nafya-user'); setUser(null); navigate('/login', { replace: true }) }, Math.max(0, user.expiresAt - Date.now()))
-    return () => window.clearTimeout(timeout)
-  }, [navigate, user?.expiresAt])
 
   const stats = useMemo(() => ({ revenue: reservations.reduce((sum, item) => sum + item.harga, 0), rooms: reservations.reduce((sum, item) => sum + item.kamar, 0), checkedIn: reservations.filter((item) => item.status === 'Sudah Check In').length }), [reservations])
   const filtered = useMemo(() => reservations.filter((item) => filter === 'Semua' || item.status === filter), [reservations, filter])
@@ -86,30 +159,360 @@ function App() {
     })
   }, [reservations])
 
-  const logout = () => { setUser(null); localStorage.removeItem('nafya-user'); navigate('/login', { replace: true }) }
-  const loginSubmit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); try { const accounts = JSON.parse(localStorage.getItem('nafya-accounts') || '{}') as Record<string, User & { password: string }>; const account = builtInAccounts[login.email] || accounts[login.email]; if (!account || account.password !== login.password) { setLoginError('Email atau password salah.'); return }; const session = { name: account.name, role: account.role, initials: account.initials, email: account.email, expiresAt: Date.now() + SESSION_DURATION }; setUser(session); localStorage.setItem('nafya-user', JSON.stringify(session)); const from = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from; navigate(from?.pathname ? `${from.pathname}${from.search || ''}` : '/', { replace: true }) } catch { localStorage.removeItem('nafya-user'); setLoginError('Sesi login tidak dapat diproses. Silakan coba lagi.') } }
-  const registerSubmit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); try { const data = new FormData(event.currentTarget); const name = String(data.get('name')); const email = String(data.get('email')).toLowerCase(); const password = String(data.get('password')); const accounts = JSON.parse(localStorage.getItem('nafya-accounts') || '{}') as Record<string, User & { password: string }>; if (builtInAccounts[email] || accounts[email]) { setLoginError('Email sudah terdaftar.'); return }; const account = { name, role: 'Administrator', initials: name.split(' ').map((word) => word[0]).join('').slice(0, 2).toUpperCase(), email, password }; accounts[email] = account; localStorage.setItem('nafya-accounts', JSON.stringify(accounts)); const session = { ...account, expiresAt: Date.now() + SESSION_DURATION }; setUser(session); localStorage.setItem('nafya-user', JSON.stringify(session)); navigate('/', { replace: true }) } catch { localStorage.removeItem('nafya-user'); setLoginError('Registrasi tidak dapat diproses. Silakan coba lagi.') } }
+  const logout = async () => {
+    await supabase.auth.signOut({ scope: 'local' })
+    setUser(null)
+    localStorage.removeItem('nafya-user')
+    navigate('/login', { replace: true })
+  }
+
+  const loginSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setLoginError('')
+
+    const email = login.email.trim().toLowerCase()
+    const password = login.password
+
+    try {
+      const builtIn = builtInAccounts[email]
+
+      if (builtIn) {
+        if (builtIn.password !== password) {
+          setLoginError('Email atau password salah.')
+          return
+        }
+
+        const session = {
+          name: builtIn.name,
+          role: builtIn.role,
+          initials: builtIn.initials,
+          email: builtIn.email,
+          expiresAt: Date.now() + SESSION_DURATION,
+        }
+
+        setUser(session)
+        localStorage.setItem('nafya-user', JSON.stringify(session))
+
+        const from = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from
+        navigate(from?.pathname ? `${from.pathname}${from.search || ''}` : '/', { replace: true })
+        return
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+
+      if (error || !data.user) {
+        setLoginError('Email atau password salah.')
+        return
+      }
+
+      setUser(toAppUser(data.user))
+
+      const from = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from
+      navigate(from?.pathname ? `${from.pathname}${from.search || ''}` : '/', { replace: true })
+    } catch {
+      setLoginError('Login tidak dapat diproses. Silakan coba lagi.')
+    }
+  }
+
+  const registerSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setLoginError('')
+
+    try {
+      const data = new FormData(event.currentTarget)
+      const name = String(data.get('name') || '').trim()
+      const email = String(data.get('email') || '').trim().toLowerCase()
+      const password = String(data.get('password') || '')
+
+      if (builtInAccounts[email]) {
+        setLoginError('Email sudah terdaftar.')
+        return
+      }
+
+      const { data: result, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: name,
+            role: 'Administrator',
+          },
+        },
+      })
+
+      if (error) {
+        setLoginError(error.message)
+        return
+      }
+
+      if (!result.user) {
+        setLoginError('Registrasi gagal. Silakan coba lagi.')
+        return
+      }
+
+      if (result.session?.user) {
+        setUser(toAppUser(result.session.user))
+        navigate('/', { replace: true })
+      } else {
+        setLoginError('Akun berhasil dibuat. Silakan cek email lalu login.')
+        navigate('/login', { replace: true })
+      }
+    } catch {
+      setLoginError('Registrasi tidak dapat diproses. Silakan coba lagi.')
+    }
+  }
+
   const navigateSection = (next: Section) => { setSection(next); setSidebar(false); navigate(sectionPath(next)) }
   const openAdd = () => { setEditingId(null); setForm(emptyForm); setModal(true) }
   const openEdit = (item: Reservation) => { setEditingId(item.id); setForm({ nama: item.nama, hotel: item.hotel, harga: formatPriceInput(item.harga), kamar: String(item.kamar), checkIn: item.checkIn.toISOString().slice(0, 10), checkOut: item.checkOut.toISOString().slice(0, 10), jamMasuk: item.jamMasuk, nomorHp: item.nomorHp, status: item.status }); setModal(true) }
-  const saveReservation = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const price = parsePrice(form.harga); if (!form.nama || !form.hotel || !price || !form.checkIn || !form.checkOut || !form.nomorHp) return; const item: Reservation = { id: editingId || `NF-${String(Date.now()).slice(-4)}`, nama: form.nama, hotel: form.hotel, harga: price, kamar: Number(form.kamar), checkIn: new Date(form.checkIn), checkOut: new Date(form.checkOut), jamMasuk: form.jamMasuk, nomorHp: form.nomorHp, status: form.status }; setReservations((items) => editingId ? items.map((current) => current.id === editingId ? item : current) : [...items, item]); setModal(false) }
+  const saveReservation = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    const price = parsePrice(form.harga)
+
+    if (!form.nama || !form.hotel || !price || !form.checkIn || !form.checkOut || !form.nomorHp) {
+      return
+    }
+
+    try {
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
+
+      if (authError || !authUser) {
+        console.error('User belum login:', authError)
+        return
+      }
+
+      const payload = {
+        nama: form.nama,
+        hotel: form.hotel,
+        harga: price,
+        kamar: Number(form.kamar),
+        check_in: new Date(`${form.checkIn}T00:00:00`).toISOString(),
+        check_out: new Date(`${form.checkOut}T00:00:00`).toISOString(),
+        jam_masuk: form.jamMasuk,
+        nomor_hp: form.nomorHp,
+        status: form.status,
+        user_id: authUser.id,
+      }
+
+      if (editingId) {
+        const { error } = await supabase
+          .from('reservations')
+          .update(payload)
+          .eq('id', editingId)
+          .eq('user_id', authUser.id)
+
+        if (error) {
+          console.error('Gagal mengubah reservasi:', error)
+          return
+        }
+      } else {
+        const { error } = await supabase
+          .from('reservations')
+          .insert(payload)
+
+        if (error) {
+          console.error('Gagal menambah reservasi:', error)
+          return
+        }
+      }
+
+      const updatedReservations = await loadReservations(authUser.id)
+      setReservations(updatedReservations)
+      setModal(false)
+      setEditingId(null)
+      setForm(emptyForm)
+    } catch (error) {
+      console.error('Gagal menyimpan reservasi:', error)
+    }
+  }
+
+  const deleteReservation = async (id: string) => {
+    try {
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
+
+      if (authError || !authUser) {
+        console.error('User belum login:', authError)
+        return
+      }
+
+      const { error } = await supabase
+        .from('reservations')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', authUser.id)
+
+      if (error) {
+        console.error('Gagal menghapus reservasi:', error)
+        return
+      }
+
+      const updatedReservations = await loadReservations(authUser.id)
+      setReservations(updatedReservations)
+      setDetail(null)
+    } catch (error) {
+      console.error('Gagal menghapus reservasi:', error)
+    }
+  }
+
   useEffect(() => { setSection(sectionFromPath(location.pathname)) }, [location.pathname])
 
   if (!authReady) return <div className="auth-loading" role="status">Memuat sesi...</div>
   if (!user) { if (location.pathname === '/register') return <RegisterScreen onSubmit={registerSubmit} />; if (location.pathname === '/login') return <LoginScreen login={login} setLogin={setLogin} error={loginError} onSubmit={loginSubmit} />; return <AuthGuard user={user} /> }
   if (location.pathname === '/login' || location.pathname === '/register') return <Navigate to="/" replace />
   if (!protectedPaths.has(location.pathname)) return <NotFound />
-  return <div className="app-shell"><Sidebar user={user} section={section} settings={settings} count={reservations.length} open={sidebar} onNavigate={navigateSection} onLogout={logout} /><main className="main-content"><header className="topbar"><button className="icon-button menu-button" type="button" onClick={() => setSidebar(!sidebar)} aria-label="Buka navigasi"><Menu size={21} /></button><div className="breadcrumb">{section === 'dashboard' ? 'Overview' : section === 'orders' ? 'Data Pesanan' : section === 'customers' ? 'Customers' : 'Pengaturan'} <ChevronDown size={14} /></div><div className="topbar-actions"><div className="avatar">{user.initials}</div><div className="admin-meta"><strong>{user.name}</strong><span>{user.role}</span></div></div></header><div className="page-content">{section === 'dashboard' && <Dashboard stats={stats} trend={trend} reservations={filtered} onAdd={openAdd} onOrders={() => navigateSection('orders')} onDelete={(id) => setReservations((items) => items.filter((item) => item.id !== id))} onDetail={setDetail} />}{section === 'orders' && <OrdersPage reservations={filtered} filter={filter} setFilter={setFilter} onAdd={openAdd} onEdit={openEdit} onDelete={(id) => setReservations((items) => items.filter((item) => item.id !== id))} onDetail={setDetail} />}{section === 'customers' && <CustomersPage reservations={reservations} onEdit={openEdit} onDelete={(id) => setReservations((items) => items.filter((item) => item.id !== id))} />}{section === 'settings' && <SettingsPage settings={settings} setSettings={setSettings} onLogout={logout} />}</div></main>{modal && <ReservationModal editing={Boolean(editingId)} form={form} setForm={setForm} onClose={() => setModal(false)} onSubmit={saveReservation} />}{detail && <DetailModal item={detail} onClose={() => setDetail(null)} />}</div>
+  return <div className="app-shell"><Sidebar user={user} section={section} settings={settings} count={reservations.length} open={sidebar} onNavigate={navigateSection} onLogout={logout} /><main className="main-content"><header className="topbar"><button className="icon-button menu-button" type="button" onClick={() => setSidebar(!sidebar)} aria-label="Buka navigasi"><Menu size={21} /></button><div className="breadcrumb">{section === 'dashboard' ? 'Overview' : section === 'orders' ? 'Data Pesanan' : section === 'customers' ? 'Customers' : 'Pengaturan'} <ChevronDown size={14} /></div><div className="topbar-actions"><div className="avatar">{user.initials}</div><div className="admin-meta"><strong>{user.name}</strong><span>{user.role}</span></div></div></header><div className="page-content">{section === 'dashboard' && <Dashboard stats={stats} trend={trend} reservations={filtered} onAdd={openAdd} onOrders={() => navigateSection('orders')} onDelete={deleteReservation} onDetail={setDetail} />}{section === 'orders' && <OrdersPage reservations={filtered} filter={filter} setFilter={setFilter} onAdd={openAdd} onEdit={openEdit} onDelete={deleteReservation} onDetail={setDetail} />}{section === 'customers' && <CustomersPage reservations={reservations} onEdit={openEdit} onDelete={deleteReservation} />}{section === 'settings' && <SettingsPage settings={settings} setSettings={setSettings} onLogout={logout} />}</div></main>{modal && <ReservationModal editing={Boolean(editingId)} form={form} setForm={setForm} onClose={() => setModal(false)} onSubmit={saveReservation} />}{detail && <DetailModal item={detail} onClose={() => setDetail(null)} />}</div>
 }
 
-function bookingKey(email: string) { return `hotelBookings_${encodeURIComponent(email.trim().toLowerCase())}` }
 function sectionPath(section: Section) { return section === 'dashboard' ? '/' : `/${section}` }
 function sectionFromPath(pathname: string): Section { return pathname === '/customers' ? 'customers' : pathname === '/orders' ? 'orders' : pathname === '/settings' ? 'settings' : 'dashboard' }
 function localDateKey(date: Date) { return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}` }
 function parsePrice(value: string) { return Number(value.replace(/\D/g, '')) }
 function formatPriceInput(value: number) { return value ? rupiah.format(value) : '' }
 function formatPriceTyping(value: string) { const digits = value.replace(/\D/g, ''); return digits ? rupiah.format(Number(digits)) : '' }
-function loadReservations(email: string): Reservation[] { const saved = localStorage.getItem(bookingKey(email)); if (!saved) return []; try { return (JSON.parse(saved) as StoredReservation[]).map((item) => ({ ...item, checkIn: new Date(item.checkIn), checkOut: new Date(item.checkOut) })) } catch { return [] } }
+async function migrateLegacyReservations(userId: string, email: string) {
+  const storageKey = `hotelBookings_${encodeURIComponent(email.trim().toLowerCase())}`
+  const saved = localStorage.getItem(storageKey)
+
+  if (!saved) return
+
+  try {
+    const legacy = JSON.parse(saved) as Array<{
+      id?: string
+      nama?: string
+      hotel?: string
+      harga?: number
+      kamar?: number
+      checkIn?: string
+      checkOut?: string
+      jamMasuk?: string
+      nomorHp?: string
+      status?: string
+    }>
+
+    if (!Array.isArray(legacy) || legacy.length === 0) {
+      localStorage.removeItem(storageKey)
+      return
+    }
+
+    const { data: existing, error: existingError } = await supabase
+      .from('reservations')
+      .select('nama, hotel, harga, kamar, check_in, check_out, jam_masuk, nomor_hp, status')
+      .eq('user_id', userId)
+
+    if (existingError) {
+      console.error('Gagal mengecek data lama:', existingError)
+      return
+    }
+
+    const makeSignature = (item: {
+      nama: string
+      hotel: string
+      harga: number
+      kamar: number
+      check_in: string
+      check_out: string
+      jam_masuk: string
+      nomor_hp: string
+      status: string
+    }) => [
+      item.nama,
+      item.hotel,
+      item.harga,
+      item.kamar,
+      item.check_in,
+      item.check_out,
+      item.jam_masuk,
+      item.nomor_hp,
+      item.status,
+    ].join('|')
+
+    const existingSignatures = new Set(
+      (existing ?? []).map(makeSignature)
+    )
+
+    const toInsert = legacy
+      .map((item) => {
+        const checkIn = new Date(item.checkIn ?? '')
+        const checkOut = new Date(item.checkOut ?? '')
+
+        return {
+          nama: String(item.nama ?? ''),
+          hotel: String(item.hotel ?? ''),
+          harga: Number(item.harga ?? 0),
+          kamar: Number(item.kamar ?? 1),
+          check_in: checkIn.toISOString(),
+          check_out: checkOut.toISOString(),
+          jam_masuk: String(item.jamMasuk ?? ''),
+          nomor_hp: String(item.nomorHp ?? ''),
+          status: item.status === 'Sudah Check In'
+            ? 'Sudah Check In'
+            : 'Belum Check In',
+          user_id: userId,
+        }
+      })
+      .filter((item) => {
+        if (
+          !item.nama ||
+          !item.hotel ||
+          !Number.isFinite(item.harga) ||
+          !Number.isFinite(item.kamar) ||
+          Number.isNaN(new Date(item.check_in).getTime()) ||
+          Number.isNaN(new Date(item.check_out).getTime())
+        ) {
+          return false
+        }
+
+        return !existingSignatures.has(makeSignature(item))
+      })
+
+    if (toInsert.length > 0) {
+      const { error: insertError } = await supabase
+        .from('reservations')
+        .insert(toInsert)
+
+      if (insertError) {
+        console.error('Gagal memigrasikan data lama:', insertError)
+        return
+      }
+    }
+
+    localStorage.removeItem(storageKey)
+    console.log(`Migrasi berhasil: ${toInsert.length} data lama dipindahkan ke Supabase.`)
+  } catch (error) {
+    console.error('Data lama tidak dapat dimigrasikan:', error)
+  }
+}
+
+async function loadReservations(userId: string): Promise<Reservation[]> {
+  const { data, error } = await supabase
+    .from('reservations')
+    .select('*')
+    .eq('user_id', userId)
+    .order('check_in', { ascending: true })
+
+  if (error) {
+    console.error('Gagal mengambil reservasi:', error)
+    return []
+  }
+
+  return (data ?? []).map((item) => ({
+    id: String(item.id),
+    nama: String(item.nama ?? ''),
+    hotel: String(item.hotel ?? ''),
+    harga: Number(item.harga ?? 0),
+    kamar: Number(item.kamar ?? 0),
+    checkIn: new Date(item.check_in),
+    checkOut: new Date(item.check_out),
+    jamMasuk: String(item.jam_masuk ?? ''),
+    nomorHp: String(item.nomor_hp ?? ''),
+    status: item.status as Status,
+  }))
+}
+
 function loadSettings() { try { const saved = localStorage.getItem('nafya-settings'); return saved ? JSON.parse(saved) as { notifications: boolean; compact: boolean; workspace: string } : { notifications: true, compact: false, workspace: 'Nafya Hotel Management' } } catch { localStorage.removeItem('nafya-settings'); return { notifications: true, compact: false, workspace: 'Nafya Hotel Management' } } }
 function AuthGuard({ user }: { user: User | null }) { const location = useLocation(); if (user) return <Navigate to={location.pathname} replace />; return <Navigate to="/login" replace state={{ from: location }} /> }
 function NotFound() { return <main className="not-found-page"><div className="not-found-card"><div className="eyebrow">KAWAN INAP HOTEL MANAGEMENT</div><strong className="not-found-code">404</strong><h1>Halaman tidak ditemukan</h1><p>Alamat yang Anda buka tidak tersedia atau sudah dipindahkan.</p><Link className="primary-button" to="/">Kembali ke Dashboard <ArrowUpRight size={17} /></Link></div></main> }
